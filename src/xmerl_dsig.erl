@@ -166,10 +166,7 @@ verify(ElementPre, Fingerprints) ->
     DsNs = [{"ds", 'http://www.w3.org/2000/09/xmldsig#'},
         {"ec", 'http://www.w3.org/2001/10/xml-exc-c14n#'}],
     Element = case xmerl_xpath:string("saml2:Assertion", ElementPre, []) of
-        [] -> case xmerl_xpath:string("Assertion", ElementPre, []) of
-          [] -> ElementPre;
-          [Element4 = #xmlElement{}] -> Element4
-        end;
+        [] -> ElementPre;
         [Element3 = #xmlElement{}] -> Element3
     end,
     [#xmlAttribute{value = SignatureMethodAlgorithm}] = xmerl_xpath:string("ds:Signature/ds:SignedInfo/ds:SignatureMethod/@Algorithm", Element, [{namespace, DsNs}]),
@@ -183,14 +180,19 @@ verify(ElementPre, Fingerprints) ->
         [#xmlAttribute{value = NsList}] -> string:tokens(NsList, " ,")
     end,
 
-    CanonXml = xmerl_c14n:c14n(strip(Element), false, InclNs),
-    CanonXmlUtf8 = unicode:characters_to_binary(CanonXml, unicode, utf8),
-    CanonSha = crypto:hash(HashFunction, CanonXmlUtf8),
+    ValidatedAssertions = case xmerl_xpath:string("saml2:Assertion", ElementPre, []) of
+        [] -> true;
+        [ElementAssertions = #xmlElement{}] ->
+            CanonXml = xmerl_c14n:c14n(strip(ElementAssertions), false, InclNs),
+            CanonXmlUtf8 = unicode:characters_to_binary(CanonXml, unicode, utf8),
+            CanonSha = crypto:hash(HashFunction, CanonXmlUtf8),
+        
+            [#xmlText{value = Sha64}] = xmerl_xpath:string("ds:Signature/ds:SignedInfo/ds:Reference/ds:DigestValue/text()", ElementAssertions, [{namespace, DsNs}]),
+            CanonSha2 = base64:decode(Sha64),
+            CanonSha =:= CanonSha2
+    end,
 
-    [#xmlText{value = Sha64}] = xmerl_xpath:string("ds:Signature/ds:SignedInfo/ds:Reference/ds:DigestValue/text()", Element, [{namespace, DsNs}]),
-    CanonSha2 = base64:decode(Sha64),
-
-    if not (CanonSha =:= CanonSha2) ->
+    if not ValidatedAssertions ->
         {error, bad_digest};
 
     true ->
